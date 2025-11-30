@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
     tags:
-      - '*'   # 当你给上游 tag（如 3.0.0）同步后自动构建
+      - '*'
   pull_request:
 
 jobs:
@@ -15,7 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0      # 必须，否则 git describe 无法获得 tag
+          fetch-depth: 0
           submodules: true
 
       - name: Setup Go
@@ -23,7 +23,7 @@ jobs:
         with:
           go-version: '1.22'
 
-      # 获取 ksud 版本号（核心步骤）
+      # 获取 ksud 版本
       - name: Generate version
         id: ver
         run: |
@@ -31,13 +31,11 @@ jobs:
           echo "VERSION=$VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
+      # v3.0 的 ksud 目录在 ksu/userspace/daemon
       - name: Build ksud
         run: |
-          cd userspace
-          go build -ldflags "-X github.com/tiann/KernelSU/userspace/daemon.VERSION=${VERSION}" -o ksud .
+          cd ksu/userspace/daemon
+          go mod tidy
+          go build -ldflags "-X github.com/tiann/KernelSU/ksu/userspace/daemon.VERSION=${VERSION}" -o ksud .
 
       - name: Upload ksud
-        uses: actions/upload-artifact@v4
-        with:
-          name: ksud
-          path: userspace/ksud
