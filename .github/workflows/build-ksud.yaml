@@ -7,17 +7,13 @@ on:
         description: 'Pack LKM .ko files'
         required: false
         default: 'false'
-      targets:
-        description: 'Comma-separated Rust target triples (optional, default all)'
-        required: false
-        default: 'aarch64-unknown-linux-gnu,armv7-unknown-linux-gnueabihf,x86_64-unknown-linux-gnu'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: [ ${{ fromJson('["aarch64-unknown-linux-gnu","armv7-unknown-linux-gnueabihf","x86_64-unknown-linux-gnu"]') }} ]
+        target: [ "aarch64-unknown-linux-gnu", "armv7-unknown-linux-gnueabihf", "x86_64-unknown-linux-gnu", "riscv64gc-unknown-linux-gnu" ]
 
     steps:
     - name: Checkout repository
