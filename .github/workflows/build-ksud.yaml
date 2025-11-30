@@ -1,82 +1,74 @@
-name: Auto-build ksud (latest tag)
+name: Multi-arch ksud build
 
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: 'Rust target triple'
-        required: true
-        default: 'aarch64-unknown-linux-gnu'
       pack_lkm:
-        description: 'whether to pack LKM (true/false)'
+        description: 'Pack LKM .ko files'
         required: false
         default: 'false'
-      use_cache:
-        description: 'whether to use cache (true/false)'
-        required: false
-        default: 'true'
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [ "aarch64-unknown-linux-gnu", "armv7-unknown-linux-gnueabihf", "x86_64-unknown-linux-gnu" ]
 
     steps:
-    - name: Checkout repo (full history)
+    - name: Checkout repository
       uses: actions/checkout@v5
       with:
         fetch-depth: 0
+        submodules: true
 
-    - name: Fetch all tags
+    - name: Add upstream remote
       run: |
-        git fetch --tags --force
-        echo "All tags:"
-        git tag -l
+        git remote add upstream https://github.com/tiann/KernelSU.git || echo "Upstream exists"
 
-    - name: Detect latest version tag
+    - name: Fetch upstream tags and commits
+      run: |
+        git fetch upstream --tags --prune --force
+        git fetch upstream main --prune --force
+
+    - name: Detect latest upstream tag
       id: version
       run: |
-        LATEST_TAG=$(git tag -l "v*" --sort=-v:refname | head -n 1)
-        echo "Latest tag: $LATEST_TAG"
-        if [ -z "$LATEST_TAG" ]; then
-          echo "::error::No version tag found!"
-          exit 1
-        fi
+        LATEST_TAG=$(git ls-remote --tags upstream | grep -E 'refs/tags/v[0-9]' | awk -F/ '{print $3}' | sort -V | tail -n1)
+        echo "Latest upstream tag: $LATEST_TAG"
         echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
 
-    - name: Checkout latest tag
+    - name: Checkout latest upstream tag
       run: |
-        echo "Checking out tag: ${{ steps.version.outputs.tag }}"
-        git checkout ${{ steps.version.outputs.tag }}
+        git checkout tags/${{ steps.version.outputs.tag }} -b build-${{ steps.version.outputs.tag }}
 
-    - name: Show version info
+    - name: Show git describe version
+      id: describe
       run: |
-        echo "Describe version:"
-        git describe --tags --always
+        VER=$(git describe --tags --always --dirty)
+        echo "Version = $VER"
+        echo "ver=$VER" >> $GITHUB_OUTPUT
 
     - name: Download LKM artifacts
       if: ${{ github.event.inputs.pack_lkm == 'true' }}
       uses: actions/download-artifact@v6
 
-    - name: Prepare LKM files (optional)
+    - name: Prepare LKM files
       if: ${{ github.event.inputs.pack_lkm == 'true' }}
       run: |
-        mkdir -p userspace/ksud/bin/aarch64/
-        shopt -s nullglob || true
+        mkdir -p userspace/ksud/bin/${{ matrix.target }}
+        shopt -s nullglob
         files=(android*-lkm/*_kernelsu.ko)
         if [ ${#files[@]} -eq 0 ]; then
-          echo "::error::No *_kernelsu.ko found."
+          echo "::error::No *_kernelsu.ko found"
           exit 1
         fi
-        cp "${files[@]}" userspace/ksud/bin/aarch64/
-        ls -la userspace/ksud/bin/aarch64/
+        cp "${files[@]}" userspace/ksud/bin/${{ matrix.target }}/
 
     - name: Setup Rust
       run: |
         rustup update stable
-
-    - name: Add Rust target
-      run: |
-        rustup target add ${{ github.event.inputs.target }}
+        rustup target add ${{ matrix.target }}
 
     - name: Install cross
       run: |
@@ -84,13 +76,16 @@ jobs:
 
     - name: Build ksud
       run: |
-        echo "Building ksud..."
-        cross build --target ${{ github.event.inputs.target }} --release --manifest-path ./userspace/ksud/Cargo.toml
-        echo "Build result version:"
+        echo "Building ksud for ${{ matrix.target }}..."
+        cross build \
+          --target ${{ matrix.target }} \
+          --release \
+          --manifest-path userspace/ksud/Cargo.toml
+        echo "Build finished. Version:"
         git describe --tags --always
 
     - name: Upload ksud artifact
       uses: actions/upload-artifact@v5
       with:
-        name: ksud-${{ github.event.inputs.target }}-${{ steps.version.outputs.tag }}
+        name: ksud-${{ matrix.target }}-${{ steps.describe.outputs.ver }}
         path: userspace/ksud/target/**/release/ksud*
