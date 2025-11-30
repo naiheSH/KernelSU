@@ -1,4 +1,4 @@
-name: Build ksud with version (v3.0.0)
+name: Auto-build ksud (latest tag)
 
 on:
   workflow_dispatch:
@@ -26,16 +26,31 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Fetch all remote tags (very important)
+    - name: Fetch all tags
       run: |
         git fetch --tags --force
-        echo "Tags fetched:"
+        echo "All tags:"
         git tag -l
 
-    - name: Checkout v3.0.0
+    - name: Detect latest version tag
+      id: version
       run: |
-        git checkout v3.0.0
-        echo "Current version:"
+        LATEST_TAG=$(git tag -l "v*" --sort=-v:refname | head -n 1)
+        echo "Latest tag: $LATEST_TAG"
+        if [ -z "$LATEST_TAG" ]; then
+          echo "::error::No version tag found!"
+          exit 1
+        fi
+        echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+    - name: Checkout latest tag
+      run: |
+        echo "Checking out tag: ${{ steps.version.outputs.tag }}"
+        git checkout ${{ steps.version.outputs.tag }}
+
+    - name: Show version info
+      run: |
+        echo "Describe version:"
         git describe --tags --always
 
     - name: Download LKM artifacts
@@ -58,7 +73,6 @@ jobs:
     - name: Setup Rust
       run: |
         rustup update stable
-      shell: bash
 
     - name: Add Rust target
       run: |
@@ -78,5 +92,5 @@ jobs:
     - name: Upload ksud artifact
       uses: actions/upload-artifact@v5
       with:
-        name: ksud-${{ github.event.inputs.target }}-v3.0.0
+        name: ksud-${{ github.event.inputs.target }}-${{ steps.version.outputs.tag }}
         path: userspace/ksud/target/**/release/ksud*
