@@ -1,0 +1,32 @@
+```yaml
+name: Run ksud (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Rust target triple (required)'
+        required: true
+        default: aarch64-unknown-linux-gnu
+      os:
+        description: 'runs-on'
+        required: false
+        default: ubuntu-latest
+      pack_lkm:
+        description: 'whether to pack LKM (true/false)'
+        required: false
+        default: 'true'
+      use_cache:
+        description: 'whether to use cache (true/false)'
+        required: false
+        default: 'true'
+
+jobs:
+  call-ksud:
+    uses: ./.github/workflows/ksud.yml
+    with:
+      target: ${{ github.event.inputs.target }}
+      os: ${{ github.event.inputs.os }}
+      pack_lkm: ${{ fromJSON(github.event.inputs.pack_lkm) }}
+      use_cache: ${{ fromJSON(github.event.inputs.use_cache) }}
+```
