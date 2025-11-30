@@ -1,0 +1,68 @@
+name: One-off build ksud (cf0bb45, v3.0.0)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Rust target triple (required)'
+        required: true
+        default: 'aarch64-unknown-linux-gnu'
+      pack_lkm:
+        description: 'whether to pack LKM (true/false)'
+        required: false
+        default: 'true'
+      use_cache:
+        description: 'whether to use cache (true/false)'
+        required: false
+        default: 'true'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout commit cf0bb45
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+        ref: cf0bb45
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v6
+      # 如果你希望只下载特定 artifact，请在上层 caller 上传时指定 name，并在此处加 with: name: ${{ github.event.inputs.lkm_artifact_name }}
+
+    - name: Prepare LKM files (if requested)
+      if: ${{ github.event.inputs.pack_lkm == 'true' }}
+      run: |
+        set -euo pipefail
+        mkdir -p userspace/ksud/bin/aarch64/
+        # 允许没有匹配但给出清晰提示
+        shopt -s nullglob || true
+        files=(android*-lkm/*_kernelsu.ko)
+        if [ ${#files[@]} -eq 0 ]; then
+          echo "::error::没有找到 android*-lkm/*_kernelsu.ko。请确保先上传对应 artifact，或将 pack_lkm 设为 false。"
+          echo "当前 runner 目录内容："
+          ls -la || true
+          exit 1
+        fi
+        echo "Found LKM files: ${files[*]}"
+        cp "${files[@]}" userspace/ksud/bin/aarch64/
+        ls -la userspace/ksud/bin/aarch64/
+
+    - name: Setup Rust targets
+      run: |
+        rustup update stable
+        rustup target add ${{ github.event.inputs.target }} || true
+
+    - name: Install cross
+      run: |
+        RUSTFLAGS="" cargo install cross --git https://github.com/cross-rs/cross --rev 66845c1
+
+    - name: Build ksud
+      run: |
+        CROSS_NO_WARNINGS=0 cross build --target ${{ github.event.inputs.target }} --release --manifest-path ./userspace/ksud/Cargo.toml
+
+    - name: Upload ksud artifact (v3.0.0)
+      uses: actions/upload-artifact@v5
+      with:
+        name: ksud-${{ github.event.inputs.target }}-v3.0.0
+        path: userspace/ksud/target/**/release/ksud*
