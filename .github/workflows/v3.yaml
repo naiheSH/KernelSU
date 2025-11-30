@@ -1,17 +1,16 @@
-
-name: One-off build ksud (cf0bb45, v3.0.0)
+name: Build ksud with version (v3.0.0)
 
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'Rust target triple (required)'
+        description: 'Rust target triple'
         required: true
         default: 'aarch64-unknown-linux-gnu'
       pack_lkm:
         description: 'whether to pack LKM (true/false)'
         required: false
-        default: 'true'
+        default: 'false'
       use_cache:
         description: 'whether to use cache (true/false)'
         required: false
@@ -20,67 +19,63 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-    - name: Checkout repository (full history)
+    - name: Checkout repo (full history)
       uses: actions/checkout@v5
       with:
         fetch-depth: 0
 
-    - name: Ensure and checkout commit cf0bb45
+    - name: Fetch all remote tags (very important)
       run: |
-        set -euo pipefail
-        COMMIT=cf0bb45
-        # 如果本地已经有该提交，直接 checkout；否则尝试 fetch 提交并再 checkout
-        if git rev-parse --verify --quiet "$COMMIT" >/dev/null; then
-          echo "Commit $COMMIT exists locally, checking out."
-          git checkout "$COMMIT"
-        else
-          echo "Commit $COMMIT not found locally; fetching from origin..."
-          # 拉取远端所有分支和 tags（如果仓库是 shallow clone，这步会把历史补全）
-          git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*' || true
-          git fetch origin "$COMMIT" || true
-          if git rev-parse --verify --quiet "$COMMIT" >/dev/null; then
-            git checkout "$COMMIT"
-          else
-            echo "::error::Commit $COMMIT not found after fetching. Exiting."
-            git log --oneline -n 5 || true
-            exit 1
-          fi
-        fi
+        git fetch --tags --force
+        echo "Tags fetched:"
+        git tag -l
 
-    - name: Download artifacts
+    - name: Checkout v3.0.0
+      run: |
+        git checkout v3.0.0
+        echo "Current version:"
+        git describe --tags --always
+
+    - name: Download LKM artifacts
+      if: ${{ github.event.inputs.pack_lkm == 'true' }}
       uses: actions/download-artifact@v6
-      # 如需只下载特定 artifact，可在此加 with: name: <artifact-name>
 
-    - name: Prepare LKM files (if requested)
+    - name: Prepare LKM files (optional)
       if: ${{ github.event.inputs.pack_lkm == 'true' }}
       run: |
-        set -euo pipefail
         mkdir -p userspace/ksud/bin/aarch64/
         shopt -s nullglob || true
         files=(android*-lkm/*_kernelsu.ko)
         if [ ${#files[@]} -eq 0 ]; then
-          echo "::error::没有找到 android*-lkm/*_kernelsu.ko。请确保先上传对应 artifact，或将 pack_lkm 设为 false。"
-          ls -la || true
+          echo "::error::No *_kernelsu.ko found."
           exit 1
         fi
         cp "${files[@]}" userspace/ksud/bin/aarch64/
         ls -la userspace/ksud/bin/aarch64/
 
-    - name: Setup Rust targets
+    - name: Setup Rust
       run: |
         rustup update stable
-        rustup target add ${{ github.event.inputs.target }} || true
+      shell: bash
+
+    - name: Add Rust target
+      run: |
+        rustup target add ${{ github.event.inputs.target }}
 
     - name: Install cross
       run: |
-        RUSTFLAGS="" cargo install cross --git https://github.com/cross-rs/cross --rev 66845c1 || true
+        cargo install cross --git https://github.com/cross-rs/cross --rev 66845c1 || true
 
     - name: Build ksud
       run: |
-        CROSS_NO_WARNINGS=0 cross build --target ${{ github.event.inputs.target }} --release --manifest-path ./userspace/ksud/Cargo.toml
+        echo "Building ksud..."
+        cross build --target ${{ github.event.inputs.target }} --release --manifest-path ./userspace/ksud/Cargo.toml
+        echo "Build result version:"
+        git describe --tags --always
 
-    - name: Upload ksud artifact (v3.0.0)
+    - name: Upload ksud artifact
       uses: actions/upload-artifact@v5
       with:
         name: ksud-${{ github.event.inputs.target }}-v3.0.0
