@@ -1,10 +1,9 @@
 name: Build ksud
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main ]
-    tags:
-      - '*'
   pull_request:
 
 jobs:
@@ -21,9 +20,8 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: 1.22
 
-      # 获取 ksud 版本
       - name: Generate version
         id: ver
         run: |
@@ -31,11 +29,16 @@ jobs:
           echo "VERSION=$VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
-      # v3.0 的 ksud 目录在 ksu/userspace/daemon
       - name: Build ksud
+        working-directory: ksu/userspace/daemon
         run: |
-          cd ksu/userspace/daemon
           go mod tidy
-          go build -ldflags "-X github.com/tiann/KernelSU/ksu/userspace/daemon.VERSION=${VERSION}" -o ksud .
+          go build \
+            -ldflags "-X github.com/tiann/KernelSU/ksu/userspace/daemon.VERSION=${VERSION}" \
+            -o ksud .
 
-      - name: Upload ksud
+      - name: Upload ksud artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ksud
+          path: ksu/userspace/daemon/ksud
