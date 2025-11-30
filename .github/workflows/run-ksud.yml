@@ -1,72 +1,30 @@
-name: Build ksud
+name: Run ksud (manual)
+
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
       target:
+        description: 'Rust target triple (required)'
         required: true
-        type: string
+        default: 'aarch64-unknown-linux-gnu'
       os:
+        description: 'runs-on'
         required: false
-        type: string
-        default: ubuntu-latest
+        default: 'ubuntu-latest'
       pack_lkm:
+        description: 'whether to pack LKM (true/false)'
         required: false
-        type: boolean
-        default: true
+        default: 'true'
       use_cache:
+        description: 'whether to use cache (true/false)'
         required: false
-        type: boolean
-        default: true
+        default: 'true'
+
 jobs:
-  build:
-    runs-on: ${{ inputs.os }}
-    steps:
-    - uses: actions/checkout@v5
-      with:
-        fetch-depth: 0
-
-    - name: Download artifacts
-      uses: actions/download-artifact@v6
-      # 若你想只下载特定 artifact，可在被调用方传入 artifact 名称并在此处使用 with: name: ${{ inputs.lkm_artifact_name }}
-
-    - name: Prepare LKM files
-      if: ${{ inputs.pack_lkm }}
-      run: |
-        set -euo pipefail
-        mkdir -p userspace/ksud/bin/aarch64/
-        # 将 artifacts 统一下载到当前目录（download-artifact 默认行为）。
-        # 使用 bash 的 nullglob 来避免未匹配时报错，但显式检测是否找到了文件：
-        shopt -s nullglob
-        files=(android*-lkm/*_kernelsu.ko)
-        if [ ${#files[@]} -eq 0 ]; then
-          echo "ERROR: 没有找到 android*-lkm/*_kernelsu.ko 文件。请确保之前的 job 已上传名为 android*-lkm 的 artifact，或把 pack_lkm 设为 false。"
-          echo "当前目录内容："
-          ls -la || true
-          # 若 LKM 是必须的，退出并失败；若可选，改为 exit 0 来跳过。
-          exit 1
-        fi
-        echo "Found LKM files: ${files[*]}"
-        cp "${files[@]}" userspace/ksud/bin/aarch64/
-        ls -la userspace/ksud/bin/aarch64/
-    - name: Setup rustup
-      run: |
-        rustup update stable
-        rustup target add x86_64-apple-darwin
-        rustup target add aarch64-apple-darwin
-    - uses: Swatinem/rust-cache@v2
-      with:
-        workspaces: userspace/ksud
-        cache-targets: false
-
-    - name: Install cross
-      run: |
-        RUSTFLAGS="" cargo install cross --git https://github.com/cross-rs/cross --rev 66845c1
-
-    - name: Build ksud
-      run: CROSS_NO_WARNINGS=0 cross build --target ${{ inputs.target }} --release --manifest-path ./userspace/ksud/Cargo.toml
-
-    - name: Upload ksud artifact
-      uses: actions/upload-artifact@v5
-      with:
-        name: ksud-${{ inputs.target }}
-        path: userspace/ksud/target/**/release/ksud*
+  call-ksud:
+    uses: ./.github/workflows/ksud.yml
+    with:
+      target: ${{ github.event.inputs.target }}
+      os: ${{ github.event.inputs.os }}
+      pack_lkm: ${{ github.event.inputs.pack_lkm == 'true' }}
+      use_cache: ${{ github.event.inputs.use_cache == 'true' }}
