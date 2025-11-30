@@ -18,7 +18,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ contains(github.event.inputs.target, 'apple-darwin') && 'macos-latest' || 'ubuntu-latest' }}
     steps:
     - name: Checkout repository (full history)
       uses: actions/checkout@v5
@@ -29,13 +29,11 @@ jobs:
       run: |
         set -euo pipefail
         COMMIT=cf0bb45
-        # 如果本地已经有该提交，直接 checkout；否则尝试 fetch 提交并再 checkout
         if git rev-parse --verify --quiet "$COMMIT" >/dev/null; then
           echo "Commit $COMMIT exists locally, checking out."
           git checkout "$COMMIT"
         else
           echo "Commit $COMMIT not found locally; fetching from origin..."
-          # 拉取远端所有分支和 tags（如果仓库是 shallow clone，这步会把历史补全）
           git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*' || true
           git fetch origin "$COMMIT" || true
           if git rev-parse --verify --quiet "$COMMIT" >/dev/null; then
@@ -49,27 +47,34 @@ jobs:
 
     - name: Download artifacts
       uses: actions/download-artifact@v6
-      # 如需只下载特定 artifact，可在此加 with: name: <artifact-name>
 
     - name: Prepare LKM files (if requested)
       if: ${{ github.event.inputs.pack_lkm == 'true' }}
       run: |
         set -euo pipefail
         mkdir -p userspace/ksud/bin/aarch64/
-        shopt -s nullglob || true
+        shopt -s nullglob
         files=(android*-lkm/*_kernelsu.ko)
         if [ ${#files[@]} -eq 0 ]; then
-          echo "::error::没有找到 android*-lkm/*_kernelsu.ko。请确保先上传对应 artifact，或将 pack_lkm 设为 false。"
+          echo "::error::No LKM files found. Ensure artifacts are uploaded or set pack_lkm=false."
           ls -la || true
           exit 1
         fi
         cp "${files[@]}" userspace/ksud/bin/aarch64/
         ls -la userspace/ksud/bin/aarch64/
 
-    - name: Setup Rust targets
-      run: |
-        rustup update stable
-        rustup target add ${{ github.event.inputs.target }} || true
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+        targets: ${{ github.event.inputs.target }}
+
+    - name: Cache Rust dependencies
+      if: ${{ github.event.inputs.use_cache == 'true' }}
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: userspace/ksud
+        cache-targets: false
 
     - name: Install cross
       run: |
@@ -78,6 +83,14 @@ jobs:
     - name: Build ksud
       run: |
         CROSS_NO_WARNINGS=0 cross build --target ${{ github.event.inputs.target }} --release --manifest-path ./userspace/ksud/Cargo.toml
+
+    - name: Verify build output
+      run: |
+        if [ ! -f "userspace/ksud/target/${{ github.event.inputs.target }}/release/ksud" ]; then
+          echo "::error::ksud binary not found in target directory!"
+          exit 1
+        fi
+        ls -la "userspace/ksud/target/${{ github.event.inputs.target }}/release/"
 
     - name: Upload ksud artifact (v3.0.0)
       uses: actions/upload-artifact@v5
